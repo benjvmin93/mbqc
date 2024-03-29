@@ -1,5 +1,6 @@
 import numpy as np
-from .clifford import X, Z, get, TABLE
+import clifford
+from .clifford import X, Z, TABLE
 from . import pauli
 from .command import Plane
 from .logger import logger
@@ -22,9 +23,9 @@ SWAP_TENSOR = np.array(
 
 def meas_op(vec: tuple[float, float, float], measurement: int):
     op_mat = np.eye(2, dtype=np.complex128) / 2
+    sign = (-1) ** measurement
     for i in range(3):
-        cliff = get(i + 1).matrix
-        sign = (-1) ** measurement
+        cliff = clifford.CLIFFORD[i + 1]
         op_mat += sign * vec[i] * cliff / 2
     return op_mat
 
@@ -131,8 +132,8 @@ class StateVec:
         # logger.info(f"Measuring qubit {index} in plane {plane} and angle {angle}.")
 
         # Get projected states
-        s_signal = sum([measurements[i] for i in s_domain])
-        t_signal = sum([measurements[i] for i in t_domain])
+        s_signal = sum(measurements[i] for i in s_domain)
+        t_signal = sum(measurements[i] for i in t_domain)
 
         # Update angle
         measure_update = pauli.MeasureUpdate.compute(
@@ -179,9 +180,7 @@ class StateVec:
         """
         Apply one qubit operator to |psi> at right index.
         """
-        psi = np.tensordot(op, self.psi, (1, index))
-        psi = np.moveaxis(psi, 0, index)
-        return psi
+        return single_qubit_evolution(self, op, index)
 
     def multi_qubit_evolution(self, op: np.ndarray, qargs: tuple[int, int]) -> None:
         """
@@ -197,12 +196,12 @@ class StateVec:
         )
         self.psi = np.moveaxis(self.psi, [i for i in range(len(qargs))], qargs)
 
-    def normalize(self) -> None:
+    def normalize(self) -> np.ndarray:
         """
         Normalize vector state (ie. divides it by its norm).
         """
         norm = _norm(self.psi)
-        self.psi /= norm
+        return self.psi / norm
 
     def remove_qubit(self, index: int) -> None:
         """
@@ -215,12 +214,12 @@ class StateVec:
         self.psi = (
             psi if not np.isclose(psi_norm, 0) else self.psi.take(indices=1, axis=index)
         )
-        self.normalize()
+        self.psi = self.normalize()
 
     def expectation_single(self, op: np.ndarray, index: int) -> np.complex128:
-        self.normalize()
-        evolved = self.single_qubit_evolution(op, index)
-        return np.dot(self.psi.flatten().conjugate(), evolved.flatten())
+        psi = self.normalize()
+        evolved = single_qubit_evolution(psi, op, index)
+        return np.dot(psi.flatten().conjugate(), evolved.flatten())
 
 
 def _norm(psi: np.ndarray) -> float:
@@ -228,3 +227,11 @@ def _norm(psi: np.ndarray) -> float:
     Computes the norm of a state vector.
     """
     return np.sqrt(abs(sum(psi.flatten().conj() * psi.flatten())))
+
+def single_qubit_evolution(psi, op: np.ndarray, index: int):
+    """
+        Apply one qubit operator to |psi> at right index.
+        """
+    psi = np.tensordot(op, psi, (1, index))
+    psi = np.moveaxis(psi, 0, index)
+    return psi
